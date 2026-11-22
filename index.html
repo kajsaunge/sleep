@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060b16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Vågen</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #060b16; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #dim { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 4s linear; }
+  #ui {
+    position: fixed; left: 0; right: 0; bottom: max(24px, env(safe-area-inset-bottom));
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+    font: 14px/1 system-ui, sans-serif; transition: opacity 1.5s;
+  }
+  #ui button {
+    background: rgba(255,255,255,.06); color: rgba(210,225,240,.55);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 999px;
+    padding: 10px 16px; font: inherit;
+  }
+  #ui button.on { color: rgba(220,235,245,.85); border-color: rgba(160,200,220,.3); }
+  .hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="dim"></div>
+<div id="ui">
+  <button id="snd">Ljud: av</button>
+  <button data-min="0" class="on">Ingen timer</button>
+  <button data-min="15">15 min</button>
+  <button data-min="30">30 min</button>
+</div>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d');
+let W, H;
+function size() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  c.width = W * dpr; c.height = H * dpr;
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', size); size();
+
+// Rytm: in 4 s, håll 4 s, ut 8 s
+const IN = 4, HOLD = 4, OUT = 8, CYCLE = IN + HOLD + OUT, ROUNDS = 5;
+const ease = p => (1 - Math.cos(Math.PI * p)) / 2;
+
+// 0 = botten, 1 = toppen
+function level(t) {
+  const p = ((t % CYCLE) + CYCLE) % CYCLE;
+  if (p < IN) return ease(p / IN);
+  if (p < IN + HOLD) return 1;
+  return 1 - ease((p - IN - HOLD) / OUT);
+}
+function phase(t) {
+  const p = t % CYCLE;
+  if (p < IN) return { idx: 0, text: 'andas in', left: IN - p, into: p };
+  if (p < IN + HOLD) return { idx: 1, text: 'håll', left: IN + HOLD - p, into: p - IN };
+  return { idx: 2, text: 'andas ut', left: CYCLE - p, into: p - IN - HOLD };
+}
+
+// ---------- Ljud ----------
+// Två ljudlägen: "varm" (mjukt ackord som andas med vågen) och "musik" (inspelad musik i slinga).
+// Båda har samma tre klangsignaler för andningen. Knappen växlar: av -> varm -> musik -> av
+const VOL = .7;
+const MODES = ['off', 'warm', 'music'];
+const LABEL = { off: 'Ljud: av', warm: 'Ljud: varm', music: 'Ljud: musik' };
+const MUSIC_URL = 'sleepy-evening.mp3'; // "Sleepy Evening" av Light_Music, Pixabay
+const XFADE = 6; // sekunders övertoning när musiken börjar om
+let ac = null, master, warmBus, musicBus, padFilter, padGain;
+let mode = 'off', soundOn = false, lastPh = -1;
+let musicBuf = null, musicLoading = false, nextStart = 0, playing = [];
+
+function initAudio() {
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0; master.connect(ac.destination);
+  warmBus = ac.createGain(); warmBus.gain.value = 0; warmBus.connect(master);
+  musicBus = ac.createGain(); musicBus.gain.value = 0; musicBus.connect(master);
+
+  // VARM: mjukt ackord (A, E, A, C#) genom ett lågpassfilter, lätt svävning
+  padFilter = ac.createBiquadFilter(); padFilter.type = 'lowpass'; padFilter.frequency.value = 500; padFilter.Q.value = .4;
+  padGain = ac.createGain(); padGain.gain.value = .12;
+  padFilter.connect(padGain).connect(warmBus);
+  [[110, -3, .5, 'triangle'], [110, 3, .5, 'triangle'], [164.81, 0, .3, 'sine'],
+   [220, 2, .22, 'triangle'], [277.18, -2, .1, 'sine']].forEach(([f, det, v, type]) => {
+    const o = ac.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = det;
+    const g = ac.createGain(); g.gain.value = v; o.connect(g).connect(padFilter); o.start();
+  });
+}
+
+// MUSIK: laddas första gången läget väljs
+async function loadMusic() {
+  if (musicBuf || musicLoading) return;
+  musicLoading = true;
+  try {
+    const data = await (await fetch(MUSIC_URL)).arrayBuffer();
+    musicBuf = await new Promise((ok, fail) => ac.decodeAudioData(data, ok, fail));
+  } catch (e) {
+    snd.textContent = 'Ljud: musik (kunde inte laddas)';
+  }
+  musicLoading = false;
+  if (mode === 'music') snd.textContent = LABEL.music;
+}
+// Spelar låten en gång, med mjuk in- och uttoning så att varven glider över i varandra
+function playMusic(when) {
+  const dur = musicBuf.duration;
+  const src = ac.createBufferSource(); src.buffer = musicBuf;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(1, when + XFADE);
+  g.gain.setValueAtTime(1, when + dur - XFADE);
+  g.gain.linearRampToValueAtTime(0, when + dur);
+  src.connect(g).connect(musicBus);
+  src.start(when); src.stop(when + dur);
+  playing.push(src);
+  src.onended = () => { playing = playing.filter(s => s !== src); };
+  nextStart = when + dur - XFADE;
+}
+function stopMusic() {
+  playing.forEach(s => { try { s.stop(); } catch (e) {} });
+  playing = []; nextStart = 0;
+}
+
+// Klang: mjuk attack, lång avklingning
+function bell(partials, vol, decay) {
+  const now = ac.currentTime + .01;
+  partials.forEach(([f, v]) => {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(vol * v, now + .02);
+    g.gain.exponentialRampToValueAtTime(.0001, now + decay);
+    o.connect(g).connect(master); o.start(now); o.stop(now + decay + .1);
+  });
+}
+// Tre signaler: inandning börjar (ljusast), håll, andas ut (lägst). Utjämnade så att de upplevs lika starka.
+const CUES = [
+  () => bell([[440, 1], [1194, .06]], .055, 3.5),
+  () => bell([[329.63, 1], [896, .1]], .13, 2.5),
+  () => bell([[220, 1], [597, .1]], .17, 4.5),
+];
+
+function updateAudio(lv, idx) {
+  if (!ac || !soundOn) return;
+  const now = ac.currentTime;
+  if (mode === 'warm') {
+    // tonen blir aldrig tyst: ljusare och starkare vid inandning, mörkare vid utandning
+    padFilter.frequency.setTargetAtTime(350 + lv * 900, now, .2);
+    padGain.gain.setTargetAtTime(.09 + lv * .08, now, .25);
+  } else if (mode === 'music' && musicBuf && nextStart < now + .5) {
+    playMusic(Math.max(nextStart, now + .05));
+  }
+  if (idx !== lastPh) {
+    if (lastPh !== -1) CUES[idx]();
+    lastPh = idx;
+  }
+}
+
+function setMode(m) {
+  mode = m; soundOn = m !== 'off'; lastPh = -1;
+  if (!ac) initAudio();
+  ac.resume();
+  const now = ac.currentTime;
+  master.gain.cancelScheduledValues(now);
+  master.gain.setTargetAtTime(soundOn ? VOL : 0, now, 1.2);
+  warmBus.gain.setTargetAtTime(m === 'warm' ? 1 : 0, now, .8);
+  musicBus.gain.setTargetAtTime(m === 'music' ? 1 : 0, now, .8);
+  if (m !== 'music') setTimeout(() => { if (mode !== 'music') stopMusic(); }, 3000);
+  snd.textContent = LABEL[m];
+  if (m === 'music' && !musicBuf) { snd.textContent = 'Ljud: musik (laddar…)'; loadMusic(); }
+  snd.classList.toggle('on', soundOn);
+}
+const snd = document.getElementById('snd');
+snd.addEventListener('click', e => {
+  e.stopPropagation();
+  setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]);
+  showUI();
+});
+
+// ---------- Animation ----------
+let start = null, raf, ended = false;
+function frame(ms) {
+  if (start === null) start = ms;
+  const t = (ms - start) / 1000;
+  const cx = W / 2;
+  const mid = H * .60, amp = Math.min(H * .13, 140);
+  const Y = tt => mid + amp - level(tt) * amp * 2;
+  const speed = W / 13; // px per sekund
+
+  const sky = x.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#05080f'); sky.addColorStop(1, '#0b1626');
+  x.fillStyle = sky; x.fillRect(0, 0, W, H);
+
+  const lv = level(t);
+  updateAudio(lv, phase(t).idx);
+  const glow = x.createRadialGradient(cx, H * .5, 0, cx, H * .5, Math.max(W, H) * .65);
+  glow.addColorStop(0, `rgba(110,150,190,${.04 + lv * .06})`);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = glow; x.fillRect(0, 0, W, H);
+
+  [[.86, .018, 1.4, .05, '40,70,105'], [.92, .014, 2.2, -.04, '30,55,85']].forEach(([y, a, k, s, col]) => {
+    x.beginPath(); x.moveTo(0, H);
+    for (let px = 0; px <= W + 8; px += 8) {
+      const u = px / W * Math.PI * 2;
+      x.lineTo(px, H * y + Math.sin(u * k + t * s * 6) * H * a);
+    }
+    x.lineTo(W, H); x.closePath();
+    x.fillStyle = `rgba(${col},.45)`; x.fill();
+  });
+
+  x.beginPath();
+  for (let px = -10; px <= W + 10; px += 4) {
+    const yv = Y(t + (px - cx) / speed);
+    px === -10 ? x.moveTo(px, yv) : x.lineTo(px, yv);
+  }
+  const lg = x.createLinearGradient(0, 0, W, 0);
+  lg.addColorStop(0, 'rgba(170,200,225,0)');
+  lg.addColorStop(.2, 'rgba(190,215,235,.55)');
+  lg.addColorStop(.5, 'rgba(215,232,245,.9)');
+  lg.addColorStop(.8, 'rgba(190,215,235,.55)');
+  lg.addColorStop(1, 'rgba(170,200,225,0)');
+  x.strokeStyle = lg; x.lineWidth = 6; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.shadowColor = 'rgba(150,190,225,.5)'; x.shadowBlur = 18;
+  x.stroke(); x.shadowBlur = 0;
+
+  const by = Y(t), r = 26;
+  const halo = x.createRadialGradient(cx, by, r * .6, cx, by, r * 3.2);
+  halo.addColorStop(0, `rgba(170,205,235,${.18 + lv * .17})`);
+  halo.addColorStop(1, 'rgba(170,205,235,0)');
+  x.fillStyle = halo; x.beginPath(); x.arc(cx, by, r * 3.2, 0, 7); x.fill();
+  const ball = x.createRadialGradient(cx - r * .35, by - r * .35, r * .1, cx, by, r);
+  ball.addColorStop(0, '#f4f8fb'); ball.addColorStop(.7, '#c9d8e6'); ball.addColorStop(1, '#9fb4c8');
+  x.fillStyle = ball; x.beginPath(); x.arc(cx, by, r, 0, 7); x.fill();
+
+  const ph = phase(t);
+  const fade = Math.min(1, ph.into / .6, ph.left / .4);
+  x.textAlign = 'center';
+  x.fillStyle = `rgba(225,235,245,${.85 * fade})`;
+  x.font = `500 ${Math.round(Math.min(W * .09, 42))}px system-ui, sans-serif`;
+  x.fillText(ph.text, cx, H * .24);
+  x.fillStyle = `rgba(190,210,228,${.45 * fade})`;
+  x.font = `300 ${Math.round(Math.min(W * .06, 26))}px system-ui, sans-serif`;
+  x.fillText(Math.ceil(ph.left), cx, H * .24 + Math.min(W * .09, 42));
+
+  const round = Math.floor(t / CYCLE) + 1;
+  if (round <= ROUNDS) {
+    x.fillStyle = 'rgba(170,190,210,.35)';
+    x.font = '13px system-ui, sans-serif';
+    x.fillText(`${round} av ${ROUNDS}`, cx, H * .24 - Math.min(W * .1, 48));
+  }
+
+  raf = requestAnimationFrame(frame);
+}
+raf = requestAnimationFrame(frame);
+
+// ---------- Skärmen vaken ----------
+let lock = null;
+async function wake() { try { lock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+// Ljudet pausas när sidan inte syns (annan app, låst skärm) och fortsätter när du kommer tillbaka
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (ac) ac.suspend(); return; }
+  if (ended) return;
+  wake();
+  if (ac && soundOn) { lastPh = -1; ac.resume(); }
+});
+addEventListener('pagehide', () => { if (ac) ac.suspend(); });
+wake();
+
+// ---------- Timer ----------
+// Sista minuten: bild och ljud tonar ut. Sedan stannar allt och skärmen får slockna.
+const dim = document.getElementById('dim'), ui = document.getElementById('ui');
+let fadeT, endT;
+function clearTimer() {
+  clearTimeout(fadeT); clearTimeout(endT);
+  dim.style.transition = 'opacity 4s linear'; dim.style.opacity = 0;
+  if (ac && soundOn) {
+    master.gain.cancelScheduledValues(ac.currentTime);
+    master.gain.setTargetAtTime(VOL, ac.currentTime, 1.2);
+  }
+}
+function setTimer(min) {
+  clearTimer();
+  if (!min) return;
+  fadeT = setTimeout(() => {
+    dim.style.transition = 'opacity 60s linear'; dim.style.opacity = 1;
+    if (ac) {
+      const now = ac.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(0, now + 60);
+    }
+  }, (min - 1) * 60000);
+  endT = setTimeout(stopAll, min * 60000);
+}
+function stopAll() {
+  ended = true;
+  cancelAnimationFrame(raf);
+  if (ac) ac.suspend();
+  if (lock) { lock.release().catch(() => {}); lock = null; }
+  ui.classList.add('hidden');
+}
+function restart() {
+  ended = false; start = null; lastPh = -1;
+  selectTimer(0); clearTimer();
+  if (ac && soundOn) ac.resume();
+  wake();
+  raf = requestAnimationFrame(frame);
+}
+function selectTimer(min) {
+  ui.querySelectorAll('button[data-min]').forEach(b => b.classList.toggle('on', +b.dataset.min === min));
+}
+ui.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-min]'); if (!btn) return;
+  e.stopPropagation();
+  const min = +btn.dataset.min;
+  selectTimer(min); setTimer(min); showUI();
+});
+
+// Knapparna försvinner efter några sekunder, tryck för att visa igen
+let hideT;
+function showUI() {
+  ui.classList.remove('hidden');
+  clearTimeout(hideT); hideT = setTimeout(() => ui.classList.add('hidden'), 4000);
+}
+document.addEventListener('click', () => { if (ended) restart(); showUI(); });
+showUI();
+</script>
+</body>
+</html>
