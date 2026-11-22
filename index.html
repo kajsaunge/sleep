@@ -30,11 +30,12 @@
   }
   #ui button.on { color: rgba(220,235,245,.85); border-color: rgba(160,200,220,.3); }
   .hidden { opacity: 0; pointer-events: none; }
-  #remind {
+  #remind, #ex {
     position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px;
     background: none; border: 0; padding: 10px; font: 13px/1 system-ui, sans-serif;
     color: rgba(190,210,228,.5); transition: opacity 1.5s;
   }
+  #ex { right: auto; left: 16px; }
   #sheet {
     position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: center;
     background: rgba(2,4,10,.6); transition: opacity .4s; z-index: 10;
@@ -67,6 +68,7 @@
 <canvas id="c"></canvas>
 <div id="dim"></div>
 <div id="hint" class="hidden">Tryck var som helst för att starta ljudet</div>
+<button id="ex">Övning: våg</button>
 <button id="remind">Påminn mig</button>
 <div id="sheet" class="hidden">
   <div class="box" role="dialog" aria-labelledby="sheet-title">
@@ -95,22 +97,38 @@ function size() {
 }
 addEventListener('resize', size); size();
 
-// Rytm: in 4 s, håll 4 s, ut 8 s
-const IN = 4, HOLD = 4, OUT = 8, CYCLE = IN + HOLD + OUT, ROUNDS = 5;
+// Två övningar. Varje fas: [typ, sekunder]. Typ: in, hold, out.
+// Båda tar 16 sekunder per varv.
+const EXERCISES = {
+  wave: { label: 'Våg', phases: [['in', 4], ['hold', 4], ['out', 8]] },         // in 4, håll 4, ut 8
+  box:  { label: 'Box', phases: [['in', 4], ['hold', 4], ['out', 4], ['hold', 4]] }, // in 4, håll 4, ut 4, håll 4
+};
+const TEXT = { in: 'andas in', hold: 'håll', out: 'andas ut' };
+const CUE_IDX = { in: 0, hold: 1, out: 2 };
+const ROUNDS = 5;
 const ease = p => (1 - Math.cos(Math.PI * p)) / 2;
+let exercise = 'wave';
+const cycle = () => EXERCISES[exercise].phases.reduce((s, [, d]) => s + d, 0);
 
-// 0 = botten, 1 = toppen
-function level(t) {
-  const p = ((t % CYCLE) + CYCLE) % CYCLE;
-  if (p < IN) return ease(p / IN);
-  if (p < IN + HOLD) return 1;
-  return 1 - ease((p - IN - HOLD) / OUT);
-}
+// Var i varvet vi är: fasens nummer (i), typ, hur långt in i fasen (0–1) och sekunder kvar
 function phase(t) {
-  const p = t % CYCLE;
-  if (p < IN) return { idx: 0, text: 'andas in', left: IN - p, into: p };
-  if (p < IN + HOLD) return { idx: 1, text: 'håll', left: IN + HOLD - p, into: p - IN };
-  return { idx: 2, text: 'andas ut', left: CYCLE - p, into: p - IN - HOLD };
+  const ph = EXERCISES[exercise].phases, C = cycle();
+  let p = ((t % C) + C) % C;
+  for (let i = 0; i < ph.length; i++) {
+    const [type, d] = ph[i];
+    if (p < d || i === ph.length - 1) {
+      return { i, type, idx: CUE_IDX[type], text: TEXT[type], into: p, left: d - p, prog: Math.min(1, p / d) };
+    }
+    p -= d;
+  }
+}
+// 0 = tom (efter utandning), 1 = full (efter inandning)
+function level(t) {
+  const f = phase(t);
+  if (f.type === 'in') return ease(f.prog);
+  if (f.type === 'out') return 1 - ease(f.prog);
+  const prev = EXERCISES[exercise].phases[(f.i - 1 + EXERCISES[exercise].phases.length) % EXERCISES[exercise].phases.length][0];
+  return prev === 'in' ? 1 : 0;
 }
 
 // ---------- Sparade val ----------
@@ -201,7 +219,7 @@ const CUES = [
   () => bell([[220, 1], [597, .1]], .17, 4.5),
 ];
 
-function updateAudio(lv, idx) {
+function updateAudio(lv, f) {
   if (!ac || !soundOn) return;
   const now = ac.currentTime;
   if (mode === 'warm') {
@@ -211,9 +229,9 @@ function updateAudio(lv, idx) {
   } else if (mode === 'music' && musicBuf && nextStart < now + .5) {
     playMusic(Math.max(nextStart, now + .05));
   }
-  if (idx !== lastPh) {
-    if (lastPh !== -1) CUES[idx]();
-    lastPh = idx;
+  if (f.i !== lastPh) {
+    if (lastPh !== -1) CUES[f.idx]();
+    lastPh = f.i;
   }
 }
 
@@ -271,13 +289,16 @@ function frame(ms) {
   const mid = H * .60, amp = Math.min(H * .13, 140);
   const Y = tt => mid + amp - level(tt) * amp * 2;
   const speed = W / 13; // px per sekund
+  // Boxen: en rundad kvadrat i mitten
+  const side = Math.min(W * .62, H * .34), bx0 = cx - side / 2, by0 = H * .58 - side / 2;
+  const lowest = exercise === 'box' ? by0 + side : mid + amp; // andningsfigurens lägsta punkt
 
   const sky = x.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, '#05080f'); sky.addColorStop(1, '#0b1626');
   x.fillStyle = sky; x.fillRect(0, 0, W, H);
 
   const lv = level(t);
-  updateAudio(lv, phase(t).idx);
+  updateAudio(lv, phase(t));
   const glow = x.createRadialGradient(cx, H * .5, 0, cx, H * .5, Math.max(W, H) * .65);
   glow.addColorStop(0, `rgba(110,150,190,${.04 + lv * .06})`);
   glow.addColorStop(1, 'rgba(0,0,0,0)');
@@ -286,7 +307,7 @@ function frame(ms) {
   // Vattnet längst ner: två lager som ändrar form långsamt och lyfter när du andas in.
   BG_WAVES.forEach(L => {
     // håll vågorna under andningslinjen även på korta skärmar
-    const floorY = mid + amp + 26 + WAVE_GAP + H * (L.lift + L.a);
+    const floorY = lowest + 26 + WAVE_GAP + H * (L.lift + L.a);
     const base = Math.max(H * L.y, floorY) - lv * H * L.lift;
     x.beginPath(); x.moveTo(0, H);
     for (let px = 0; px <= W + 8; px += 8) {
@@ -299,29 +320,48 @@ function frame(ms) {
     x.fillStyle = `rgba(${L.col},${L.alpha})`; x.fill();
   });
 
-  x.beginPath();
-  for (let px = -10; px <= W + 10; px += 4) {
-    const yv = Y(t + (px - cx) / speed);
-    px === -10 ? x.moveTo(px, yv) : x.lineTo(px, yv);
+  let ballX = cx, ballY;
+  if (exercise === 'wave') {
+    x.beginPath();
+    for (let px = -10; px <= W + 10; px += 4) {
+      const yv = Y(t + (px - cx) / speed);
+      px === -10 ? x.moveTo(px, yv) : x.lineTo(px, yv);
+    }
+    const lg = x.createLinearGradient(0, 0, W, 0);
+    lg.addColorStop(0, 'rgba(170,200,225,0)');
+    lg.addColorStop(.2, 'rgba(190,215,235,.55)');
+    lg.addColorStop(.5, 'rgba(215,232,245,.9)');
+    lg.addColorStop(.8, 'rgba(190,215,235,.55)');
+    lg.addColorStop(1, 'rgba(170,200,225,0)');
+    x.strokeStyle = lg; x.lineWidth = 6; x.lineCap = 'round'; x.lineJoin = 'round';
+    x.shadowColor = 'rgba(150,190,225,.5)'; x.shadowBlur = 18;
+    x.stroke(); x.shadowBlur = 0;
+    ballY = Y(t);
+  } else {
+    // Kulan går medsols runt boxen: upp vänster sida (in), höger längs toppen (håll),
+    // ner höger sida (ut), vänster längs botten (håll)
+    const f = phase(t), e = ease(f.prog);
+    const corners = [[bx0, by0 + side], [bx0, by0], [bx0 + side, by0], [bx0 + side, by0 + side]];
+    const [ax, ay] = corners[f.i], [zx, zy] = corners[(f.i + 1) % 4];
+    ballX = ax + (zx - ax) * e; ballY = ay + (zy - ay) * e;
+    const rr = side * .08;
+    x.lineWidth = 6; x.lineCap = 'round'; x.lineJoin = 'round';
+    x.strokeStyle = 'rgba(190,215,235,.28)';
+    x.beginPath(); x.roundRect(bx0, by0, side, side, rr); x.stroke();
+    // sidan som pågår lyser starkare
+    x.strokeStyle = 'rgba(215,232,245,.9)'; x.shadowColor = 'rgba(150,190,225,.5)'; x.shadowBlur = 18;
+    const len = Math.hypot(zx - ax, zy - ay), dx = (zx - ax) / len * rr, dy = (zy - ay) / len * rr; // bara den raka delen, inte hörnen
+    x.beginPath(); x.moveTo(ax + dx, ay + dy); x.lineTo(zx - dx, zy - dy); x.stroke(); x.shadowBlur = 0;
   }
-  const lg = x.createLinearGradient(0, 0, W, 0);
-  lg.addColorStop(0, 'rgba(170,200,225,0)');
-  lg.addColorStop(.2, 'rgba(190,215,235,.55)');
-  lg.addColorStop(.5, 'rgba(215,232,245,.9)');
-  lg.addColorStop(.8, 'rgba(190,215,235,.55)');
-  lg.addColorStop(1, 'rgba(170,200,225,0)');
-  x.strokeStyle = lg; x.lineWidth = 6; x.lineCap = 'round'; x.lineJoin = 'round';
-  x.shadowColor = 'rgba(150,190,225,.5)'; x.shadowBlur = 18;
-  x.stroke(); x.shadowBlur = 0;
 
-  const by = Y(t), r = 26;
-  const halo = x.createRadialGradient(cx, by, r * .6, cx, by, r * 3.2);
+  const by = ballY, r = 26, bxp = ballX;
+  const halo = x.createRadialGradient(bxp, by, r * .6, bxp, by, r * 3.2);
   halo.addColorStop(0, `rgba(170,205,235,${.18 + lv * .17})`);
   halo.addColorStop(1, 'rgba(170,205,235,0)');
-  x.fillStyle = halo; x.beginPath(); x.arc(cx, by, r * 3.2, 0, 7); x.fill();
-  const ball = x.createRadialGradient(cx - r * .35, by - r * .35, r * .1, cx, by, r);
+  x.fillStyle = halo; x.beginPath(); x.arc(bxp, by, r * 3.2, 0, 7); x.fill();
+  const ball = x.createRadialGradient(bxp - r * .35, by - r * .35, r * .1, bxp, by, r);
   ball.addColorStop(0, '#f4f8fb'); ball.addColorStop(.7, '#c9d8e6'); ball.addColorStop(1, '#9fb4c8');
-  x.fillStyle = ball; x.beginPath(); x.arc(cx, by, r, 0, 7); x.fill();
+  x.fillStyle = ball; x.beginPath(); x.arc(bxp, by, r, 0, 7); x.fill();
 
   const ph = phase(t);
   const fade = Math.min(1, ph.into / .6, ph.left / .4);
@@ -333,7 +373,7 @@ function frame(ms) {
   x.font = `300 ${Math.round(Math.min(W * .06, 26))}px system-ui, sans-serif`;
   x.fillText(Math.ceil(ph.left), cx, H * .24 + Math.min(W * .09, 42));
 
-  const round = Math.floor(t / CYCLE) + 1;
+  const round = Math.floor(t / cycle()) + 1;
   if (round <= ROUNDS) {
     x.fillStyle = 'rgba(170,190,210,.35)';
     x.font = '13px system-ui, sans-serif';
@@ -410,15 +450,32 @@ ui.addEventListener('click', e => {
 // Knapparna försvinner efter några sekunder, tryck för att visa igen
 let hideT;
 function showUI() {
-  const rb = document.getElementById('remind'); // påminn-knappen följer de andra knapparna
-  ui.classList.remove('hidden'); rb.classList.remove('hidden');
-  clearTimeout(hideT); hideT = setTimeout(() => { ui.classList.add('hidden'); rb.classList.add('hidden'); }, 4000);
+  // knapparna uppe (övning, påminn mig) följer de andra knapparna
+  const top = [document.getElementById('remind'), document.getElementById('ex')];
+  ui.classList.remove('hidden'); top.forEach(b => b.classList.remove('hidden'));
+  clearTimeout(hideT); hideT = setTimeout(() => { ui.classList.add('hidden'); top.forEach(b => b.classList.add('hidden')); }, 4000);
 }
 document.addEventListener('click', () => { if (ended) restart(); showUI(); });
 showUI();
 
 const savedTimer = +store.get('timer', 0);
 if ([15, 30].includes(savedTimer)) { selectTimer(savedTimer); setTimer(savedTimer); }
+
+// ---------- Övning ----------
+// Växlar mellan våg och box. Valet sparas. Ett byte börjar om från början av en inandning.
+const exBtn = document.getElementById('ex');
+function setExercise(name) {
+  exercise = EXERCISES[name] ? name : 'wave';
+  exBtn.textContent = 'Övning: ' + EXERCISES[exercise].label.toLowerCase();
+  store.set('exercise', exercise);
+  start = null; lastPh = -1;
+}
+exBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  setExercise(exercise === 'wave' ? 'box' : 'wave');
+  showUI();
+});
+setExercise(store.get('exercise', 'wave'));
 
 // ---------- Påminnelse i kalendern ----------
 // Ingen server behövs: Google Kalender får en färdig länk, andra kalendrar en .ics-fil från /api/ics
