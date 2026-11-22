@@ -30,6 +30,32 @@
   }
   #ui button.on { color: rgba(220,235,245,.85); border-color: rgba(160,200,220,.3); }
   .hidden { opacity: 0; pointer-events: none; }
+  #remind {
+    position: fixed; top: max(16px, env(safe-area-inset-top)); right: 16px;
+    background: none; border: 0; padding: 10px; font: 13px/1 system-ui, sans-serif;
+    color: rgba(190,210,228,.5); transition: opacity 1.5s;
+  }
+  #sheet {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(2,4,10,.6); transition: opacity .4s; z-index: 10;
+  }
+  #sheet .box {
+    width: 100%; max-width: 440px; box-sizing: border-box; margin: 0 12px max(16px, env(safe-area-inset-bottom));
+    padding: 22px 20px 18px; border-radius: 22px; background: #0d1828; border: 1px solid rgba(255,255,255,.07);
+    color: rgba(220,232,244,.9); font: 15px/1.45 system-ui, sans-serif;
+  }
+  #sheet h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  #sheet p { margin: 0 0 16px; color: rgba(190,210,228,.6); font-size: 14px; }
+  #sheet input[type=time] {
+    width: 100%; box-sizing: border-box; padding: 12px 14px; margin-bottom: 14px; border-radius: 14px;
+    border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); color: inherit; font: 22px/1 system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  #sheet .act {
+    display: block; width: 100%; box-sizing: border-box; padding: 13px; margin-top: 8px; border-radius: 14px; text-align: center;
+    border: 1px solid rgba(160,200,220,.25); background: rgba(160,200,220,.1); color: inherit; font: inherit; text-decoration: none;
+  }
+  #sheet .close { background: none; border-color: transparent; color: rgba(190,210,228,.55); }
   #hint {
     position: fixed; left: 0; right: 0; bottom: calc(max(24px, env(safe-area-inset-bottom)) + 52px);
     text-align: center; font: 13px/1 system-ui, sans-serif; color: rgba(190,210,228,.45);
@@ -41,6 +67,17 @@
 <canvas id="c"></canvas>
 <div id="dim"></div>
 <div id="hint" class="hidden">Tryck var som helst för att starta ljudet</div>
+<button id="remind">Påminn mig</button>
+<div id="sheet" class="hidden">
+  <div class="box" role="dialog" aria-labelledby="sheet-title">
+    <h2 id="sheet-title">Påminn mig varje kväll</h2>
+    <p>Välj tid. Påminnelsen läggs i din egen kalender och upprepas varje dag.</p>
+    <input id="rtime" type="time" value="20:45">
+    <a id="rgoogle" class="act" target="_blank" rel="noopener">Lägg till i Google Kalender</a>
+    <a id="rics" class="act">Annan kalender (iPhone, Outlook)</a>
+    <button id="rclose" class="act close">Stäng</button>
+  </div>
+</div>
 <div id="ui">
   <button id="snd">Ljud: av</button>
   <button data-min="0" class="on">Ingen timer</button>
@@ -357,14 +394,45 @@ ui.addEventListener('click', e => {
 // Knapparna försvinner efter några sekunder, tryck för att visa igen
 let hideT;
 function showUI() {
-  ui.classList.remove('hidden');
-  clearTimeout(hideT); hideT = setTimeout(() => ui.classList.add('hidden'), 4000);
+  const rb = document.getElementById('remind'); // påminn-knappen följer de andra knapparna
+  ui.classList.remove('hidden'); rb.classList.remove('hidden');
+  clearTimeout(hideT); hideT = setTimeout(() => { ui.classList.add('hidden'); rb.classList.add('hidden'); }, 4000);
 }
 document.addEventListener('click', () => { if (ended) restart(); showUI(); });
 showUI();
 
 const savedTimer = +store.get('timer', 0);
 if ([15, 30].includes(savedTimer)) { selectTimer(savedTimer); setTimer(savedTimer); }
+
+// ---------- Påminnelse i kalendern ----------
+// Ingen server behövs: Google Kalender får en färdig länk, andra kalendrar en .ics-fil från /api/ics
+const sheet = document.getElementById('sheet'), rtime = document.getElementById('rtime');
+const rgoogle = document.getElementById('rgoogle'), rics = document.getElementById('rics');
+const remindBtn = document.getElementById('remind');
+rtime.value = store.get('remind', '20:45');
+function remindLinks() {
+  const t = /^\d{2}:\d{2}$/.test(rtime.value) ? rtime.value : '20:45';
+  store.set('remind', t);
+  const [h, m] = t.split(':').map(Number);
+  const startD = new Date(); startD.setHours(h, m, 0, 0);
+  const endD = new Date(startD.getTime() + 15 * 60000); // 15 minuter, även över midnatt
+  const p2 = (n) => String(n).padStart(2, '0');
+  const fmt = (d) => `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}T${p2(d.getHours())}${p2(d.getMinutes())}00`;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Stockholm';
+  rgoogle.href = 'https://calendar.google.com/calendar/render?' + new URLSearchParams({
+    action: 'TEMPLATE',
+    text: 'Sleep – dags att varva ner',
+    details: 'Andas in 4, håll 4, andas ut 8.\nhttps://sleep.kajsaunge.se',
+    dates: `${fmt(startD)}/${fmt(endD)}`,
+    ctz: tz,
+    recur: 'RRULE:FREQ=DAILY',
+  });
+  rics.href = '/api/ics?t=' + encodeURIComponent(t);
+}
+rtime.addEventListener('input', remindLinks);
+remindBtn.addEventListener('click', e => { e.stopPropagation(); remindLinks(); sheet.classList.remove('hidden'); });
+document.getElementById('rclose').addEventListener('click', e => { e.stopPropagation(); sheet.classList.add('hidden'); });
+sheet.addEventListener('click', e => { e.stopPropagation(); if (e.target === sheet) sheet.classList.add('hidden'); });
 
 // ---------- Offline ----------
 if ('serviceWorker' in navigator) {
