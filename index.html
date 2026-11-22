@@ -253,6 +253,15 @@ snd.addEventListener('click', e => {
 });
 
 // ---------- Animation ----------
+// Bakgrundsvågor: höjd, styrka, färg, och delvågor [våglängd, fart (rad/s, minus = åt andra hållet), fas, andel]
+const BG_WAVES = [
+  { y: .80, a: .030, lift: .006, col: '45,78,115', alpha: .30,
+    parts: [[1.1, .22, 0, .6], [2.3, -.31, 1.7, .3], [3.7, .17, 4.1, .15]] },
+  { y: .86, a: .026, lift: .010, col: '40,70,105', alpha: .42,
+    parts: [[1.5, -.26, 2.2, .55], [2.8, .19, .4, .3], [4.4, -.36, 3.3, .15]] },
+  { y: .92, a: .020, lift: .014, col: '28,52,82', alpha: .55,
+    parts: [[1.9, .29, 5.0, .55], [3.3, -.21, 2.6, .3], [5.1, .14, 1.1, .15]] },
+];
 let start = null, raf, ended = false;
 function frame(ms) {
   if (start === null) start = ms;
@@ -273,14 +282,19 @@ function frame(ms) {
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   x.fillStyle = glow; x.fillRect(0, 0, W, H);
 
-  [[.86, .018, 1.4, .05, '40,70,105'], [.92, .014, 2.2, -.04, '30,55,85']].forEach(([y, a, k, s, col]) => {
+  // Vattnet längst ner: tre lager där flera långsamma vågor går åt olika håll och i olika takt,
+  // så att formen hela tiden ändras i stället för att bara glida. Lyfter lite när du andas in.
+  BG_WAVES.forEach(L => {
+    const base = H * L.y - lv * H * L.lift;
     x.beginPath(); x.moveTo(0, H);
     for (let px = 0; px <= W + 8; px += 8) {
       const u = px / W * Math.PI * 2;
-      x.lineTo(px, H * y + Math.sin(u * k + t * s * 6) * H * a);
+      let yv = 0;
+      L.parts.forEach(([k, w, ph, amt]) => { yv += Math.sin(u * k + t * w + ph) * amt; });
+      x.lineTo(px, base + yv * H * L.a);
     }
     x.lineTo(W, H); x.closePath();
-    x.fillStyle = `rgba(${col},.45)`; x.fill();
+    x.fillStyle = `rgba(${L.col},${L.alpha})`; x.fill();
   });
 
   x.beginPath();
