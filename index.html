@@ -253,15 +253,16 @@ snd.addEventListener('click', e => {
 });
 
 // ---------- Animation ----------
-// Bakgrundsvågor: höjd, styrka, färg, och delvågor [våglängd, fart (rad/s, minus = åt andra hållet), fas, andel]
+// Bakgrundsvågor: två lager med långa, mjuka vågor. Delvågorna är heltalsmultiplar av varandra
+// (våglängd 1 och 2) och rör sig sakta, så att rörelsen blir jämn och harmonisk.
+// [våglängd, fart (rad/s, minus = åt andra hållet), fas, andel]
 const BG_WAVES = [
-  { y: .77, a: .030, lift: .035, col: '58,98,140', alpha: .38,
-    parts: [[1.1, .22, 0, .6], [2.3, -.31, 1.7, .3], [3.7, .17, 4.1, .15]] },
-  { y: .85, a: .026, lift: .045, col: '38,68,104', alpha: .55,
-    parts: [[1.5, -.26, 2.2, .55], [2.8, .19, .4, .3], [4.4, -.36, 3.3, .15]] },
-  { y: .93, a: .020, lift: .055, col: '20,40,66', alpha: .75,
-    parts: [[1.9, .29, 5.0, .55], [3.3, -.21, 2.6, .3], [5.1, .14, 1.1, .15]] },
+  { y: .86, a: .022, lift: .030, col: '50,86,126', alpha: .40,
+    parts: [[1, .12, 0, .75], [2, -.08, 1.2, .25]] },
+  { y: .93, a: .018, lift: .035, col: '14,28,48', alpha: .85,
+    parts: [[1.3, -.10, 2.0, .75], [2.6, .07, .5, .25]] },
 ];
+const WAVE_GAP = 36; // minsta avstånd i px mellan andningslinjens lägsta punkt och vågornas topp
 let start = null, raf, ended = false;
 function frame(ms) {
   if (start === null) start = ms;
@@ -282,10 +283,11 @@ function frame(ms) {
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   x.fillStyle = glow; x.fillRect(0, 0, W, H);
 
-  // Vattnet längst ner: tre lager där flera långsamma vågor går åt olika håll och i olika takt,
-  // så att formen hela tiden ändras i stället för att bara glida. Lyfter lite när du andas in.
+  // Vattnet längst ner: två lager som ändrar form långsamt och lyfter när du andas in.
   BG_WAVES.forEach(L => {
-    const base = H * L.y - lv * H * L.lift;
+    // håll vågorna under andningslinjen även på korta skärmar
+    const floorY = mid + amp + 26 + WAVE_GAP + H * (L.lift + L.a);
+    const base = Math.max(H * L.y, floorY) - lv * H * L.lift;
     x.beginPath(); x.moveTo(0, H);
     for (let px = 0; px <= W + 8; px += 8) {
       const u = px / W * Math.PI * 2;
