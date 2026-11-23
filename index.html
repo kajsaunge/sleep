@@ -9,7 +9,7 @@
 <title>Sleep</title>
 <meta name="apple-mobile-web-app-title" content="Sleep">
 <meta property="og:title" content="Sleep">
-<meta property="og:description" content="Andas in 4, håll 4, andas ut 8.">
+<meta property="og:description" content="Lugn andning inför sömnen.">
 <meta property="og:url" content="https://sleep.kajsaunge.se">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -98,9 +98,9 @@ function size() {
 addEventListener('resize', size); size();
 
 // Två övningar. Varje fas: [typ, sekunder]. Typ: in, hold, out.
-// Båda tar 16 sekunder per varv.
+// Vågen tar 12 sekunder per varv, boxen 16.
 const EXERCISES = {
-  wave: { label: 'Våg', phases: [['in', 4], ['hold', 4], ['out', 8]] },         // in 4, håll 4, ut 8
+  wave: { label: 'Våg', phases: [['in', 3], ['hold', 3], ['out', 6]] },         // in 3, håll 3, ut 6
   box:  { label: 'Box', phases: [['in', 4], ['hold', 4], ['out', 4], ['hold', 4]] }, // in 4, håll 4, ut 4, håll 4
 };
 const TEXT = { in: 'andas in', hold: 'håll', out: 'andas ut' };
@@ -495,7 +495,7 @@ function remindLinks() {
   rgoogle.href = 'https://calendar.google.com/calendar/render?' + new URLSearchParams({
     action: 'TEMPLATE',
     text: 'Sleep – dags att varva ner',
-    details: 'Andas in 4, håll 4, andas ut 8.\nhttps://sleep.kajsaunge.se',
+    details: 'Lugn andning inför sömnen.\nhttps://sleep.kajsaunge.se',
     dates: `${fmt(startD)}/${fmt(endD)}`,
     ctz: tz,
     recur: 'RRULE:FREQ=DAILY',

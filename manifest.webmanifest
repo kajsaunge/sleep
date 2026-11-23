@@ -1,7 +1,7 @@
 {
   "name": "Sleep",
   "short_name": "Sleep",
-  "description": "Andas in 4, håll 4, andas ut 8.",
+  "description": "Lugn andning inför sömnen.",
   "lang": "sv",
   "start_url": "/",
   "scope": "/",

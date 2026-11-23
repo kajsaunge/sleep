@@ -25,7 +25,7 @@ module.exports = (req, res) => {
     'DURATION:PT15M',
     'RRULE:FREQ=DAILY',
     'SUMMARY:Sleep – dags att varva ner',
-    'DESCRIPTION:Andas in 4\\, håll 4\\, andas ut 8.\\nhttps://sleep.kajsaunge.se',
+    'DESCRIPTION:Lugn andning inför sömnen.\\nhttps://sleep.kajsaunge.se',
     'URL:https://sleep.kajsaunge.se',
     'BEGIN:VALARM',
     'ACTION:DISPLAY',
