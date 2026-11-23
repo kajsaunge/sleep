@@ -98,10 +98,10 @@ function size() {
 addEventListener('resize', size); size();
 
 // Två övningar. Varje fas: [typ, sekunder]. Typ: in, hold, out.
-// Vågen tar 11 sekunder per varv, boxen 16.
+// Vågen tar 11 sekunder per varv, boxen 12.
 const EXERCISES = {
   wave: { label: 'Våg', phases: [['in', 3], ['hold', 2], ['out', 6]] },         // in 3, håll 2, ut 6
-  box:  { label: 'Box', phases: [['in', 4], ['hold', 4], ['out', 4], ['hold', 4]] }, // in 4, håll 4, ut 4, håll 4
+  box:  { label: 'Box', phases: [['in', 3], ['hold', 3], ['out', 3], ['hold', 3]] }, // in 3, håll 3, ut 3, håll 3
 };
 const TEXT = { in: 'andas in', hold: 'håll', out: 'andas ut' };
 const CUE_IDX = { in: 0, hold: 1, out: 2 };
