@@ -3,6 +3,8 @@
 Andningsövningar för kvällen:
 - Våg: in 3 s, håll 1 s, ut 6 s
 - Box: in 3 s, håll 3 s, ut 3 s, håll 3 s
+
+Takten går att ändra i appen under Övning och sparas på enheten.
 Live: https://sleep.kajsaunge.se
 
 Musik: "Sleepy Evening" av Light_Music (Pixabay, Pixabay Content License).

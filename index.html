@@ -36,27 +36,40 @@
     color: rgba(190,210,228,.5); transition: opacity 1.5s;
   }
   #ex { right: auto; left: 16px; }
-  #sheet {
+  .sheet {
     position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: center;
     background: rgba(2,4,10,.6); transition: opacity .4s; z-index: 10;
   }
-  #sheet .box {
+  .sheet .box {
     width: 100%; max-width: 440px; box-sizing: border-box; margin: 0 12px max(16px, env(safe-area-inset-bottom));
     padding: 22px 20px 18px; border-radius: 22px; background: #0d1828; border: 1px solid rgba(255,255,255,.07);
     color: rgba(220,232,244,.9); font: 15px/1.45 system-ui, sans-serif;
   }
-  #sheet h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
-  #sheet p { margin: 0 0 16px; color: rgba(190,210,228,.6); font-size: 14px; }
-  #sheet input[type=time] {
+  .sheet h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .sheet p { margin: 0 0 16px; color: rgba(190,210,228,.6); font-size: 14px; }
+  .sheet input[type=time] {
     width: 100%; box-sizing: border-box; padding: 12px 14px; margin-bottom: 14px; border-radius: 14px;
     border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); color: inherit; font: 22px/1 system-ui, sans-serif;
     color-scheme: dark;
   }
-  #sheet .act {
+  .sheet .act {
     display: block; width: 100%; box-sizing: border-box; padding: 13px; margin-top: 8px; border-radius: 14px; text-align: center;
     border: 1px solid rgba(160,200,220,.25); background: rgba(160,200,220,.1); color: inherit; font: inherit; text-decoration: none;
   }
-  #sheet .close { background: none; border-color: transparent; color: rgba(190,210,228,.55); }
+  .sheet .close { background: none; border-color: transparent; color: rgba(190,210,228,.55); }
+  .seg { display: flex; gap: 6px; padding: 4px; margin-bottom: 14px; border-radius: 14px; background: rgba(255,255,255,.05); }
+  .seg button {
+    flex: 1; padding: 10px; border: 0; border-radius: 10px; background: none; color: rgba(190,210,228,.6); font: inherit;
+  }
+  .seg button.on { background: rgba(160,200,220,.16); color: rgba(225,236,246,.95); }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+  .row .step { display: flex; align-items: center; gap: 6px; }
+  .row .step button {
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(160,200,220,.25);
+    background: rgba(160,200,220,.08); color: inherit; font: 22px/1 system-ui, sans-serif;
+  }
+  .row .step button:disabled { opacity: .3; }
+  .row .val { min-width: 48px; text-align: center; font-size: 18px; font-variant-numeric: tabular-nums; }
   #hint {
     position: fixed; left: 0; right: 0; bottom: calc(max(24px, env(safe-area-inset-bottom)) + 52px);
     text-align: center; font: 13px/1 system-ui, sans-serif; color: rgba(190,210,228,.45);
@@ -70,7 +83,7 @@
 <div id="hint" class="hidden">Tryck var som helst för att starta ljudet</div>
 <button id="ex">Övning: våg</button>
 <button id="remind">Påminn mig</button>
-<div id="sheet" class="hidden">
+<div id="sheet" class="sheet hidden">
   <div class="box" role="dialog" aria-labelledby="sheet-title">
     <h2 id="sheet-title">Påminn mig varje kväll</h2>
     <p>Välj tid. Påminnelsen läggs i din egen kalender och upprepas varje dag.</p>
@@ -78,6 +91,16 @@
     <a id="rgoogle" class="act" target="_blank" rel="noopener">Lägg till i Google Kalender</a>
     <a id="rics" class="act">Annan kalender (iPhone, Outlook)</a>
     <button id="rclose" class="act close">Stäng</button>
+  </div>
+</div>
+<div id="exsheet" class="sheet hidden">
+  <div class="box" role="dialog" aria-labelledby="ex-title">
+    <h2 id="ex-title">Övning</h2>
+    <p>Välj övning och takt. Ändringar gäller direkt och sparas.</p>
+    <div class="seg"><button data-ex="wave">Våg</button><button data-ex="box">Box</button></div>
+    <div id="rows"></div>
+    <button id="exreset" class="act close">Återställ takten</button>
+    <button id="exclose" class="act">Klar</button>
   </div>
 </div>
 <div id="ui">
@@ -97,12 +120,22 @@ function size() {
 }
 addEventListener('resize', size); size();
 
-// Två övningar. Varje fas: [typ, sekunder]. Typ: in, hold, out.
-// Vågen tar 10 sekunder per varv, boxen 12.
-const EXERCISES = {
-  wave: { label: 'Våg', phases: [['in', 3], ['hold', 1], ['out', 6]] },         // in 3, håll 1, ut 6
-  box:  { label: 'Box', phases: [['in', 3], ['hold', 3], ['out', 3], ['hold', 3]] }, // in 3, håll 3, ut 3, håll 3
+// Två övningar. Takten går att ändra i appen och sparas på enheten.
+// Varje fas: [typ, sekunder]. Typ: in, hold, out. Ett håll på 0 sekunder hoppas över.
+const DEFAULTS = { wave: { in: 3, hold: 1, out: 6 }, box: { side: 3 } };
+// Vad som går att ställa in: [nyckel, text, minst, högst]
+const SETTINGS = {
+  wave: [['in', 'Andas in', 1, 12], ['hold', 'Håll', 0, 10], ['out', 'Andas ut', 1, 12]],
+  box: [['side', 'Sekunder per sida', 2, 8]],
 };
+let rhythm = JSON.parse(JSON.stringify(DEFAULTS));
+const EXERCISES = { wave: { label: 'Våg', phases: [] }, box: { label: 'Box', phases: [] } };
+function buildPhases() {
+  const w = rhythm.wave, b = rhythm.box.side;
+  EXERCISES.wave.phases = [['in', w.in], ['hold', w.hold], ['out', w.out]].filter(([, d]) => d > 0);
+  EXERCISES.box.phases = [['in', b], ['hold', b], ['out', b], ['hold', b]];
+}
+buildPhases();
 const TEXT = { in: 'andas in', hold: 'håll', out: 'andas ut' };
 const CUE_IDX = { in: 0, hold: 1, out: 2 };
 const ROUNDS = 5;
@@ -461,19 +494,56 @@ showUI();
 const savedTimer = +store.get('timer', 0);
 if ([15, 30].includes(savedTimer)) { selectTimer(savedTimer); setTimer(savedTimer); }
 
-// ---------- Övning ----------
-// Växlar mellan våg och box. Valet sparas. Ett byte börjar om från början av en inandning.
+// ---------- Övning och takt ----------
+// Knappen Övning öppnar ett blad där man väljer våg eller box och ställer in sekunderna.
+// Allt sparas. Varje ändring börjar om från början av en inandning.
 const exBtn = document.getElementById('ex');
+const exSheet = document.getElementById('exsheet'), rowsEl = document.getElementById('rows');
+try {
+  const saved = JSON.parse(store.get('rhythm', 'null'));
+  for (const ex in SETTINGS) for (const [k, , lo, hi] of SETTINGS[ex]) {
+    const v = saved && saved[ex] && saved[ex][k];
+    if (Number.isInteger(v) && v >= lo && v <= hi) rhythm[ex][k] = v;
+  }
+} catch (e) {}
+buildPhases();
+function restartBreath() { start = null; lastPh = -1; }
+function renderSheet() {
+  exSheet.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.ex === exercise));
+  rowsEl.innerHTML = '';
+  SETTINGS[exercise].forEach(([k, label, lo, hi]) => {
+    const v = rhythm[exercise][k];
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<span>${label}</span><span class="step">
+      <button aria-label="${label} kortare" ${v <= lo ? 'disabled' : ''}>−</button>
+      <span class="val">${v} s</span>
+      <button aria-label="${label} längre" ${v >= hi ? 'disabled' : ''}>+</button></span>`;
+    const [minus, plus] = row.querySelectorAll('button');
+    minus.onclick = () => changeRhythm(k, -1, lo, hi);
+    plus.onclick = () => changeRhythm(k, +1, lo, hi);
+    rowsEl.appendChild(row);
+  });
+}
+function changeRhythm(k, d, lo, hi) {
+  rhythm[exercise][k] = Math.max(lo, Math.min(hi, rhythm[exercise][k] + d));
+  buildPhases(); store.set('rhythm', JSON.stringify(rhythm)); restartBreath(); renderSheet();
+}
+exSheet.querySelectorAll('.seg button').forEach(b => b.onclick = () => { setExercise(b.dataset.ex); renderSheet(); });
+document.getElementById('exreset').onclick = () => {
+  rhythm[exercise] = { ...DEFAULTS[exercise] };
+  buildPhases(); store.set('rhythm', JSON.stringify(rhythm)); restartBreath(); renderSheet();
+};
+document.getElementById('exclose').onclick = () => exSheet.classList.add('hidden');
+exSheet.addEventListener('click', e => { e.stopPropagation(); if (e.target === exSheet) exSheet.classList.add('hidden'); });
 function setExercise(name) {
   exercise = EXERCISES[name] ? name : 'wave';
   exBtn.textContent = 'Övning: ' + EXERCISES[exercise].label.toLowerCase();
   store.set('exercise', exercise);
-  start = null; lastPh = -1;
+  restartBreath();
 }
 exBtn.addEventListener('click', e => {
   e.stopPropagation();
-  setExercise(exercise === 'wave' ? 'box' : 'wave');
-  showUI();
+  renderSheet(); exSheet.classList.remove('hidden');
 });
 setExercise(store.get('exercise', 'wave'));
 
